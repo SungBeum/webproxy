@@ -34,6 +34,8 @@ int main(int argc, char **argv) {
   // 듣기 소켓을 오픈한다
   listenfd = Open_listenfd(argv[1]);
   // 무한 서버 루프를 실행한다
+
+  
   while (1) {
     clientlen = sizeof(clientaddr);
     // 반복적으로 연결 요청을 접수한다
@@ -68,7 +70,7 @@ void doit(int fd)
   // get이 아닌 다른 메소드를 요청하면, 에러 메세지를 보내고, main 루틴으로 돌아온다 , 그리고 연결은 닫고 다음 연결 요청을 기다린다.
   // if (strcasecmp(method, "GET")) {
   //   clienterror(fd, method, "501", "Not implemented", "Tiny does not implement this method");
-  //   return;
+  //   return;  
   // }
   // 다른 요청 헤더들은 무시한다
   // HEAD 메소드 구현
@@ -142,7 +144,7 @@ void read_requesthdrs(rio_t *rp)
   }
   return;
 }
-// uri 를 분석하는 함수
+//HTTP URI 를 분석하는 함수
 int parse_uri(char *uri, char *filename, char *cgiargs)
 {
   char *ptr;
@@ -178,7 +180,9 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
     return 0;
   }
 }
-
+/*
+* 정적 컨텐츠를 클라이언트에게 서비스한다.
+*/
 void serve_static(int fd, char *filename, int filesize, char *method)
 {
   int srcfd;
@@ -262,5 +266,3 @@ void serve_dynamic(int fd, char *filename, char *cgiargs, char *method)
   // 그 후 자식이 종료되어 정리되는 것을 기다리기 위해 wait 함수에서 블록
   Wait(NULL);
 }
-
-// /cgi-bin/adder?n1=5&n2=67

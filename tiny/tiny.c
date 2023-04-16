@@ -158,8 +158,8 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
     // 만약 uri 가 '/' 문자로 끝난다면, 기본 파일 이름을 추가한다.
     if (uri[strlen(uri)-1] == '/')
       strcat(filename, "home.html");
-    else
-      strcat(filename, ".html");
+    // else
+      // strcat(filename, ".html");
     return 1;
   }
   // 만약 동적 컨텐츠를 위한 것이라면,

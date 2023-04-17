@@ -39,3 +39,22 @@ int main(int argc, char **argv)
     }
     exit(0);
 }
+
+// while (1)
+// {
+//     clientlen = sizeof(struct sockaddr_storage);
+//     connfdp = Malloc(sizeof(int));
+//     *connfdp = Accept(listenfd, (SA *) &clientaddr, &clientlen);
+//     Pthread_create(&tid, NULLm thread, connfdp);
+
+// }
+
+// void*thread(void *vargp)
+// {
+//     int connfd = *((int *)vargp);
+//     Pthread_detach(pthread_self());
+//     Free(vargp);
+//     echo(connfd);
+//     Close(connfd);
+//     return NULL;
+// }

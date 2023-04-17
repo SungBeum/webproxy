@@ -8,7 +8,7 @@
  */
 #include "csapp.h"
 
-void doit(int fd);
+void *doit(void *vargp);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *filename, char *cgiargs);
 void serve_static(int fd, char *filename, int filesize, char *method);
@@ -16,15 +16,17 @@ void get_filetype(char *filename, char *filetype);
 void serve_dynamic(int fd, char *filename, char *cgiargs, char *method);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
                  char *longmsg);
+void*thread(void *vargp);
 
 /*
 * tiny 서버 main 함수 ( 반복실행 서버로 명령줄에서 넘겨받은 포트로의 연결 요청을 듣는다. )
 */
 int main(int argc, char **argv) {
-  int listenfd, connfd;
+  int listenfd, *connfd;
   char hostname[MAXLINE], port[MAXLINE];
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
+  pthread_t tid;
 
   // command line 2가 아니면 host, port 번호를 프린트
   if (argc != 2) {
@@ -35,31 +37,43 @@ int main(int argc, char **argv) {
   listenfd = Open_listenfd(argv[1]);
   // 무한 서버 루프를 실행한다
 
-  
-  while (1) {
-    clientlen = sizeof(clientaddr);
-    // 반복적으로 연결 요청을 접수한다
-    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-    Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE,
-                0);
-    printf("Accepted connection from (%s, %s)\n", hostname, port);
-    // 트랜잭션(transaction : 정보 처리) 수행
-    doit(connfd);
-    // 자신 쪽의 연결 끝을 닫는다
-    Close(connfd);
-  }
+
+   while (1)
+  {
+      clientlen = sizeof(struct sockaddr_storage);
+      connfd = Malloc(sizeof(int));
+      *connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen);
+      Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
+      Pthread_create(&tid, NULL, doit, connfd);
+  } 
+  // while (1) {
+  //   clientlen = sizeof(clientaddr);
+  //   // 반복적으로 연결 요청을 접수한다
+  //   connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+  //   Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
+  //   printf("Accepted connection from (%s, %s)\n", hostname, port);
+  //   // 트랜잭션(transaction : 정보 처리) 수행
+  //   doit(connfd);
+  //   // 자신 쪽의 연결 끝을 닫는다
+  //   Close(connfd);
+  // }
 }
 
 /*
 * 한 개의 HTTP 트랜잭션을 처리하는 함수
 */
-void doit(int fd)
+void *doit(void *vargp)
 {
   int is_static;
   struct stat sbuf;
   char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
   char filename[MAXLINE], cgiargs[MAXLINE];
   rio_t rio;
+
+  
+  int fd = *((int *)vargp);
+  Pthread_detach(pthread_self());
+  Free(vargp);
   // rio_t 타입의 읽기 버퍼를 초기화하는 함수 (Rio_readinitb)
   Rio_readinitb(&rio, fd);
   // 요청 라인을 읽고 분석한다
@@ -106,6 +120,7 @@ void doit(int fd)
     // 동적 컨텐츠를 제공
     serve_dynamic(fd, filename, cgiargs, method);
   }
+  Close(fd);
 }
 
 /*

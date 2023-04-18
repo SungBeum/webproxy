@@ -11,16 +11,27 @@ void serve_dynamic(int fd, char *filename, char *cgiargs, char *method);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
                  char *longmsg);
 void *thread(void *vargp);
+typedef struct cache_storage
+{
+  char *path;
+  char *body;
+  int size;
+  struct cache_storage *next;
+  struct cache_storage *prev;
+} cache;
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
-
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr =
     "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 "
     "Firefox/10.0.3\r\n";
+    
+cache *root = NULL;
+int total_cache_size = 0;
 
 int main(int argc, char **argv) {
+  // root = (cache *)Malloc(sizeof(cache));
   printf("%s", user_agent_hdr);
   int listenfd, *connfd;
   char hostname[MAXLINE], port[MAXLINE];
@@ -41,7 +52,7 @@ int main(int argc, char **argv) {
       *connfd = Accept(listenfd, (SA *) &clientaddr, &clientlen);
       Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
       Pthread_create(&tid, NULL, doit, connfd);
-  } 
+  }
 }
 
 
@@ -53,7 +64,7 @@ void *doit(void *vargp)
   int proxyfd , con_length = 0, tiny_port;
   char *host, *port, *p, *sbuf, path[MAXLINE], tiny_name[MAXLINE], *tmp;
   rio_t rio, rio_client;
-  
+  // cache cbody, cpath, csize;
   int fd = *((int *)vargp);
   Pthread_detach(pthread_self());
   Free(vargp);
@@ -88,6 +99,11 @@ void *doit(void *vargp)
   tmp = strchr(tmp, '/');
   strcpy(path, tmp);
 
+  // 캐시 있는지 체크하는 함수
+  // if (find_cache(path))   //있으면
+  // {
+  //  return;
+  // }
 
   proxyfd = Open_clientfd(tiny_name, real_tiny_port);
   Rio_readinitb(&rio, proxyfd);
@@ -102,7 +118,13 @@ void *doit(void *vargp)
   // printf("i'm here\n");  
   while(strcmp(buf, "\r\n"))
   {
-    Rio_readlineb(&rio_client, buf, MAXLINE);
+    Rio_readlineb(&rio_client, buf, MAXLINE);    
+    // if (strstr(buf, "Proxy-Connection:"))
+    // {
+    //   tmp = strchr(buf,':');
+    //   strcpy(buf, tmp+1);
+    //   strcpy(buf, "Proxy-Connection: Close");      
+    // }
     Rio_writen(proxyfd, buf, strlen(buf));
     // printf(("buf : %s", buf));
   }
@@ -135,67 +157,79 @@ void *doit(void *vargp)
   // printf("3\n");
 
   // printf("con_length : %d\n", con_length);
-
+  // printf("i'm here\n");
   sbuf = Malloc(con_length);
+  printf("con_length: %d\n", con_length);
+
   // srcfd 의 정보를 읽어서 srcp 에 저장!
+  // csize.size = con_length;
+  // printf("csize: %d\n", &csize);
   Rio_readnb(&rio, sbuf, con_length);
   // printf("payload: %s\n", sbuf);
-  Rio_writen(fd, sbuf, con_length);
+  // cbody.body = sbuf;
+  printf("path: %s, con_len(size): %d\n", path, con_length);
+  
+  // 캐시 크기가 부족하면, delete_cache()
+  // while(con_length + total_cache_size > MAX_CACHE_SIZE)
+  // {
+  //   delete_cache();
+  // }
+  insert_cache(path, sbuf, con_length);
 
+
+  Rio_writen(fd, sbuf, con_length);
   free(sbuf);
   Close(proxyfd);
   Close(fd);
-}
-
-
-int parse_uri(char *uri, char *filename, char *cgiargs)
+}  
+void insert_cache(char *path, char *body, int size)
 {
-  char *ptr;
-  // 스트링"cgi-bin"을 포함하는 모든 uri는 동적 컨텐츠를 요청
-  if (!strstr(uri, "cgi-bin")) // 만약 정적 컨텐츠를 위한 것이면,
-  { // CGI 인자 스트링을 지우고
-    strcpy(cgiargs, "");
-    // uri 를 ./index.html 같은 상대 리눅스 경로이름으로 변환한다.
-    strcpy(filename, ".");
-    strcat(filename, uri);
-    // 만약 uri 가 '/' 문자로 끝난다면, 기본 파일 이름을 추가한다.
-    if (uri[strlen(uri)-1] == '/')
-      strcat(filename, "home.html");
-    else
-      strcat(filename, ".html");
-    return 1;
-  }
-  // 만약 동적 컨텐츠를 위한 것이라면,
-  else 
+  cache *S1 = (cache *)malloc(sizeof(cache));  
+  total_cache_size += size;
+  S1->path = path;
+  S1->size = size;
+  // printf("s_1path: %s\n",S1->path);
+  // printf("s_1size: %d\n",S1->size);
+  S1->body = body;
+  // printf("root: %p\n",root);
+  if (root == NULL)
   {
-    // 모든 CGI 인자들을 추출하고
-    ptr = index(uri, '?');
-    if (ptr) {
-      strcpy(cgiargs, ptr+1);
-      *ptr = '\0';
-    }
-    else{
-      strcpy(cgiargs, "");
-    }
-    // 나머지 uri 부분을 상대 리눅스 파일이름으로 변환한다.
-    strcpy(filename, ".");
-    strcat(filename, uri);
-    return 0;
+    // printf("i'm here\n");
+    root = S1;
+    S1->next = root;
+    S1->prev = root;
+    // printf("root_path : %s\n", root->path);
+    // printf("S1 : %p\n", S1);
+  }
+  else
+  {
+    root->prev->next = S1;
+    S1->prev = root->prev;
+    root->prev = S1;
+    S1 -> next = root;
+    root = S1;
   }
 }
 
+int find_cache(path)
+{
+  
+}
 
-
-
-//   else {
-//     // 동적 컨텐츠에 대한 것이면, 이 파일이 실행 가능한지 검증
-//     if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
-//       clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't run the CGI program");
-//       return;
-//     }
-//     // 동적 컨텐츠를 제공
-//     serve_dynamic(fd, filename, cgiargs, method);
-//   }
+void delete_cache()
+{ // 캐시가 하나
+ if (root->next = root)
+ {
+  free(root);
+  root = NULL;
+ }
+ else
+ {
+  root->prev->prev->next = root;
+  root->prev = root->prev->prev;
+  free(root->prev);
+ } 
+}
 
 void read_requesthdrs(rio_t *rp)
 {

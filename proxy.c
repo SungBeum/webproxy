@@ -1,16 +1,7 @@
 #include <stdio.h>
 #include "csapp.h"
 #include <stdlib.h>
-
-void *doit(void *vargp);
-void read_requesthdrs(rio_t *rp);
-int parse_uri(char *uri, char *filename, char *cgiargs);
-void serve_static(int fd, char *filename, int filesize, char *method);
-void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs, char *method);
-void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
-                 char *longmsg);
-void *thread(void *vargp);
+// 캐시 구조체
 typedef struct cache_storage
 {
   char *path;
@@ -19,6 +10,20 @@ typedef struct cache_storage
   struct cache_storage *next;
   struct cache_storage *prev;
 } cache;
+
+void *doit(void *vargp);
+void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
+                 char *longmsg);
+void *thread(void *vargp);
+void insert_cache(char *path, char *body, int size);
+int find_cache(path, fd);
+void delete_cache();
+void pull_cache(cache *find_root);
+
+
+
+
+
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
@@ -26,10 +31,12 @@ typedef struct cache_storage
 static const char *user_agent_hdr =
     "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 "
     "Firefox/10.0.3\r\n";
-    
+// 캐시구조체 연결리스트를 가리키기 위한 root 포인터
 cache *root = NULL;
+// 캐시 구조체 연결리스트의 size의 총합
 int total_cache_size = 0;
 
+// proxy server main 함수
 int main(int argc, char **argv) {
   // root = (cache *)Malloc(sizeof(cache));
   printf("%s", user_agent_hdr);
@@ -55,7 +62,7 @@ int main(int argc, char **argv) {
   }
 }
 
-
+// 한 개의 트랜잭션을 실행하는 doit 함수
 void *doit(void *vargp)
 {   // rio_client : 클라이언트, rio : tiny 서버, proxyfd : 프록시
   int is_static;
@@ -64,8 +71,8 @@ void *doit(void *vargp)
   int proxyfd , con_length = 0, tiny_port;
   char *host, *port, *p, *sbuf, path[MAXLINE], tiny_name[MAXLINE], *tmp;
   rio_t rio, rio_client;
-  // cache cbody, cpath, csize;
   int fd = *((int *)vargp);
+  // 스레드 분리
   Pthread_detach(pthread_self());
   Free(vargp);
 
@@ -80,45 +87,39 @@ void *doit(void *vargp)
   Rio_readlineb(&rio_client, buf, MAXLINE);
   // printf("rio_client_buf : %s\n", buf);
   
+  //uri 를 파싱 - hostname , path , version
   sscanf(buf, "%s %s %s", method, uri, version);
-  printf("method : %s \n uri : %s \n  version : %s \n", method, uri, version);
   tmp = strchr(uri, ':');
   strcpy(tmp, tmp+3);
   strncpy(tiny_name, tmp, 9);
   tiny_name[9] = '\0';
-  printf("tiny_name : %s\n", tiny_name);
-  printf("tmp : %s\n", tmp);
   tmp = strchr(tmp, ':');
   strcpy(tmp, tmp+1);
-  printf("tmp : %s\n", tmp);
   tiny_port = atoi(tmp);
   sprintf(real_tiny_port, "%d", tiny_port);
-  printf("real_tiny_port : %s\n", real_tiny_port);
-  // sprintf(read_tiny_port, tiny_port, MAXLINE);
-  // printf("tiny_port : %d\n", tiny_port);
   tmp = strchr(tmp, '/');
   strcpy(path, tmp);
 
   // 캐시 있는지 체크하는 함수
-  // if (find_cache(path))   //있으면
-  // {
-  //  return;
-  // }
+  if (find_cache(path, fd))   //있으면
+  {
+    Close(fd);
+    return;
+  }
 
+  // 프록시와 메인서버 서버 오픈 및 연결
   proxyfd = Open_clientfd(tiny_name, real_tiny_port);
   Rio_readinitb(&rio, proxyfd);
 
+  // 메인 서버에 파싱한 경로를 주기 위해 buf 에 쓰기
   sprintf(buf, "%s %s HTTP/1.0\r\n", method, path);
   Rio_writen(proxyfd, buf, strlen(buf));
-  // printf("buf : %s", buf);
-  // Rio_readlineb(&rio_client, buf, MAXLINE);
-  // Rio_writen(proxyfd, buf, strlen(buf));
-  // printf("buf : %s", buf);
 
-  // printf("i'm here\n");  
+  //buf 에 개행문자가 나올 때까지(전부 출력) 한줄씩 proxyfd 에 적을 while문
   while(strcmp(buf, "\r\n"))
   {
     Rio_readlineb(&rio_client, buf, MAXLINE);    
+    // 메인서버에 Proxy-Connection 도 보내줄 예정 - 과제 내용
     // if (strstr(buf, "Proxy-Connection:"))
     // {
     //   tmp = strchr(buf,':');
@@ -126,21 +127,16 @@ void *doit(void *vargp)
     //   strcpy(buf, "Proxy-Connection: Close");      
     // }
     Rio_writen(proxyfd, buf, strlen(buf));
-    // printf(("buf : %s", buf));
   }
-  // printf("actually i'm here\n");
   Rio_readlineb(&rio, buf, MAXLINE);
-  // printf("buf : %s", buf);
-
   Rio_writen(fd, buf, strlen(buf));
-  // printf("1\n");
+  // get이나 head가 아닌 다른 메소드를 요청하면, 에러 메세지를 보내고, main 루틴으로 돌아온다 , 그리고 연결은 닫고 다음 연결 요청을 기다린다.
   if (strcasecmp(method, "HEAD") && strcasecmp(method, "GET")) 
   {
     clienterror(fd, method, "501", "Not implemented", "Tiny does not implement this method");
     return;
   }
-  // printf("2\n");
-
+  // 메인 서버에서 response header 받아오기
   while(strcmp(buf, "\r\n"))
   {
     Rio_readlineb(&rio, buf, MAXLINE);
@@ -154,20 +150,9 @@ void *doit(void *vargp)
       continue;
     }
   }
-  // printf("3\n");
-
-  // printf("con_length : %d\n", con_length);
-  // printf("i'm here\n");
+  // response body 를 이동할 sbuf 를 content_length만큼 할당
   sbuf = Malloc(con_length);
-  printf("con_length: %d\n", con_length);
-
-  // srcfd 의 정보를 읽어서 srcp 에 저장!
-  // csize.size = con_length;
-  // printf("csize: %d\n", &csize);
   Rio_readnb(&rio, sbuf, con_length);
-  // printf("payload: %s\n", sbuf);
-  // cbody.body = sbuf;
-  printf("path: %s, con_len(size): %d\n", path, con_length);
   
   // 캐시 크기가 부족하면, delete_cache()
   // while(con_length + total_cache_size > MAX_CACHE_SIZE)
@@ -175,8 +160,6 @@ void *doit(void *vargp)
   //   delete_cache();
   // }
   insert_cache(path, sbuf, con_length);
-
-
   Rio_writen(fd, sbuf, con_length);
   free(sbuf);
   Close(proxyfd);
@@ -188,18 +171,12 @@ void insert_cache(char *path, char *body, int size)
   total_cache_size += size;
   S1->path = path;
   S1->size = size;
-  // printf("s_1path: %s\n",S1->path);
-  // printf("s_1size: %d\n",S1->size);
   S1->body = body;
-  // printf("root: %p\n",root);
   if (root == NULL)
   {
-    // printf("i'm here\n");
     root = S1;
     S1->next = root;
     S1->prev = root;
-    // printf("root_path : %s\n", root->path);
-    // printf("S1 : %p\n", S1);
   }
   else
   {
@@ -211,9 +188,35 @@ void insert_cache(char *path, char *body, int size)
   }
 }
 
-int find_cache(path)
+int find_cache(char *client_path, int client_fd)
 {
-  
+  cache *find_root = root;
+  if (find_root->path == client_path)
+  {
+    Rio_writen(client_fd,find_root->body, find_root->size);
+    return 1;
+  }
+  while(find_root->next != root)
+  {
+    find_root = find_root->next;
+    if (find_root->path == client_path)
+    {
+      Rio_writen(client_fd,find_root->body, find_root->size);
+      pull_cache(find_root);
+      return 1;
+    }
+  }
+  return 0;
+}
+
+void pull_cache(cache *find_root)
+{
+  find_root->prev->next = find_root->next;
+  find_root->next->prev = find_root->prev;
+  root->prev->next = find_root;
+  find_root->prev = root->prev;
+  root->prev = find_root;
+  find_root->next = root;
 }
 
 void delete_cache()
@@ -231,19 +234,6 @@ void delete_cache()
  } 
 }
 
-void read_requesthdrs(rio_t *rp)
-{
-  char buf[MAXLINE];
-
-  Rio_readlineb(rp, buf, MAXLINE);
-  // carriage return 과 line feed 쌍을 체크 ( \r : CR - 종이를 고정시키고 커서를 맨 앞줄로 이동시키는 것 , \n : LF - 커서 위치는 정지한 상태에서 종이를 한 줄 올리는 것)
-  while(strcmp(buf, "\r\n")) {
-    Rio_readlineb(rp, buf, MAXLINE);
-    printf("%s", buf);
-  }
-  return;
-}
-
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg)
 {
   char buf[MAXLINE], body[MAXBUF];
@@ -256,25 +246,9 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   // Print the HTTP response =
   sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
   Rio_writen(fd, buf, strlen(buf));
-  sprintf(buf, "Content-type: text/html\r\n");
+   sprintf(buf, "Content-type: text/html\r\n");
   Rio_writen(fd, buf, strlen(buf));
   sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
   Rio_writen(fd, buf, strlen(buf));
   Rio_writen(fd, body, strlen(body));
-}
-
-void get_filetype(char *filename, char *filetype)
-{
-  if (strstr(filename, ".html"))
-    strcpy(filetype, "text/html");
-  else if (strstr(filename, ".gif"))
-    strcpy(filetype, "image/gif");
-  else if (strstr(filename, ".png"))
-    strcpy(filetype, "image/png");
-  else if (strstr(filename, ".jpg"))
-    strcpy(filetype, "image/jpeg");
-  else if (strstr(filename, ".mp4"))
-    strcpy(filetype, "video/mp4");
-  else
-    strcpy(filetype, "text/plain");
 }

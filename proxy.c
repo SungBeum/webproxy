@@ -4,7 +4,7 @@
 // 캐시 구조체
 typedef struct cache_storage
 {
-  char *path;
+  char path[MAXLINE];
   char *body;
   int size;
   struct cache_storage *next;
@@ -14,12 +14,11 @@ typedef struct cache_storage
 void *doit(void *vargp);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
                  char *longmsg);
-void *thread(void *vargp);
 void insert_cache(char *path, char *body, int size);
 int find_cache(path, fd);
 void delete_cache();
 void pull_cache(cache *find_root);
-
+void get_filetype(char *filename, char *filetype);
 
 
 
@@ -72,6 +71,7 @@ void *doit(void *vargp)
   char *host, *port, *p, *sbuf, path[MAXLINE], tiny_name[MAXLINE], *tmp;
   rio_t rio, rio_client;
   int fd = *((int *)vargp);
+  
   // 스레드 분리
   Pthread_detach(pthread_self());
   Free(vargp);
@@ -99,14 +99,13 @@ void *doit(void *vargp)
   sprintf(real_tiny_port, "%d", tiny_port);
   tmp = strchr(tmp, '/');
   strcpy(path, tmp);
-
+  printf("i'm here\n");
   // 캐시 있는지 체크하는 함수
   if (find_cache(path, fd))   //있으면
-  {
+  { 
     Close(fd);
     return;
   }
-
   // 프록시와 메인서버 서버 오픈 및 연결
   proxyfd = Open_clientfd(tiny_name, real_tiny_port);
   Rio_readinitb(&rio, proxyfd);
@@ -161,7 +160,6 @@ void *doit(void *vargp)
   // }
   insert_cache(path, sbuf, con_length);
   Rio_writen(fd, sbuf, con_length);
-  free(sbuf);
   Close(proxyfd);
   Close(fd);
 }  
@@ -169,7 +167,7 @@ void insert_cache(char *path, char *body, int size)
 {
   cache *S1 = (cache *)malloc(sizeof(cache));  
   total_cache_size += size;
-  S1->path = path;
+  strcpy(S1->path, path);
   S1->size = size;
   S1->body = body;
   if (root == NULL)
@@ -191,16 +189,49 @@ void insert_cache(char *path, char *body, int size)
 int find_cache(char *client_path, int client_fd)
 {
   cache *find_root = root;
-  if (find_root->path == client_path)
+  char *cache_buf[MAXBUF];
+  char *filetype[MAXLINE];
+
+  // sprintf(buf, "HTTP/1.0 200 OK\r\n");
+  // sprintf(buf, "%sServer: Tiny Web Server\r\n", cashe_buf);
+  // sprintf(buf, "%sConnection: close\r\n", cache_buf);
+  // sprintf(buf, "%sContent-length: %d\r\n", cache_buf, find_root->size);
+  // sprintf(buf, "%sContent-type: %s\r\n\r\n", cache_buf, filetype);
+  if (find_root == NULL)
   {
+    return 0;
+  }
+
+  if (!strcmp(find_root->path, client_path))
+  { get_filetype(find_root->path, filetype);
+
+    sprintf(cache_buf, "HTTP/1.0 200 OK\r\n");
+    sprintf(cache_buf, "%sServer: Tiny Web Server\r\n", cache_buf);
+    sprintf(cache_buf, "%sConnection: close\r\n", cache_buf);
+    sprintf(cache_buf, "%sContent-length: %d\r\n", cache_buf, find_root->size);
+    sprintf(cache_buf, "%sContent-type: %s\r\n\r\n", cache_buf, filetype);
+    Rio_writen(client_fd, cache_buf, strlen(cache_buf));
+    printf("\ncache_buf : %s\n", cache_buf);
     Rio_writen(client_fd,find_root->body, find_root->size);
+    printf("\nfind_root-> body : %s\n", find_root->body);
+    printf("Am i here? \n");
+
     return 1;
+
   }
   while(find_root->next != root)
   {
     find_root = find_root->next;
-    if (find_root->path == client_path)
+    if (!strcmp(find_root->path, client_path))
     {
+      
+      sprintf(cache_buf, "HTTP/1.0 200 OK\r\n");
+      sprintf(cache_buf, "%sServer: Tiny Web Server\r\n", cache_buf);
+      sprintf(cache_buf, "%sConnection: close\r\n", cache_buf);
+      sprintf(cache_buf, "%sContent-length: %d\r\n", cache_buf, find_root->size);
+      sprintf(cache_buf, "%sContent-type: text/html\r\n\r\n", cache_buf);
+      Rio_writen(client_fd, cache_buf, strlen(cache_buf));
+
       Rio_writen(client_fd,find_root->body, find_root->size);
       pull_cache(find_root);
       return 1;
@@ -223,6 +254,7 @@ void delete_cache()
 { // 캐시가 하나
  if (root->next = root)
  {
+  free(root->body);
   free(root);
   root = NULL;
  }
@@ -230,6 +262,7 @@ void delete_cache()
  {
   root->prev->prev->next = root;
   root->prev = root->prev->prev;
+  free(root->prev->body);
   free(root->prev);
  } 
 }
@@ -251,4 +284,19 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
   Rio_writen(fd, buf, strlen(buf));
   Rio_writen(fd, body, strlen(body));
+}
+void get_filetype(char *filename, char *filetype)
+{
+  if (strstr(filename, ".html"))
+    strcpy(filetype, "text/html");
+  else if (strstr(filename, ".gif"))
+    strcpy(filetype, "image/gif");
+  else if (strstr(filename, ".png"))
+    strcpy(filetype, "image/png");
+  else if (strstr(filename, ".jpg"))
+    strcpy(filetype, "image/jpeg");
+  else if (strstr(filename, ".mp4"))
+    strcpy(filetype, "video/mp4");
+  else
+    strcpy(filetype, "text/plain");
 }

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "csapp.h"
 #include <stdlib.h>
-// 캐시 구조체
+// 캐시 구조체 선언
 typedef struct cache_storage
 {
   char path[MAXLINE];
@@ -12,25 +12,23 @@ typedef struct cache_storage
 } cache;
 
 void *doit(void *vargp);
-void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
-                 char *longmsg);
+void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 void insert_cache(char *path, char *body, int size);
 int find_cache(path, fd);
-void delete_cache();
 void pull_cache(cache *find_root);
 void get_filetype(char *filename, char *filetype);
-
-
-
+// 시간이 남으면 구현
+// void delete_cache();
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr =
     "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 "
     "Firefox/10.0.3\r\n";
-// 캐시구조체 연결리스트를 가리키기 위한 root 포인터
+// 캐시구조체 연결리스트 첫번째를 가리키기 위한 root 포인터
 cache *root = NULL;
 // 캐시 구조체 연결리스트의 size의 총합
 int total_cache_size = 0;
@@ -76,16 +74,8 @@ void *doit(void *vargp)
   Pthread_detach(pthread_self());
   Free(vargp);
 
-  // host = "localhost";
-  // port = "3000";
-
-
-
-
-  // proxyfd = Open_clientfd(host, port);
   Rio_readinitb(&rio_client, fd);
   Rio_readlineb(&rio_client, buf, MAXLINE);
-  // printf("rio_client_buf : %s\n", buf);
   
   //uri 를 파싱 - hostname , path , version
   sscanf(buf, "%s %s %s", method, uri, version);
@@ -162,20 +152,27 @@ void *doit(void *vargp)
   Rio_writen(fd, sbuf, con_length);
   Close(proxyfd);
   Close(fd);
-}  
+}
+
+// 캐시 추가 함수
 void insert_cache(char *path, char *body, int size)
 {
-  cache *S1 = (cache *)malloc(sizeof(cache));  
+  // 캐시 메모리 할당( 공유자원이므로 malloc 을 이용하여 힙 영역에 할당 )
+  cache *S1 = (cache *)Malloc(sizeof(cache));
+  // 캐시 크기만큼 total 사이즈에 추가  
   total_cache_size += size;
+  // 캐시 저장
   strcpy(S1->path, path);
   S1->size = size;
   S1->body = body;
+  // 캐시가 없으면,
   if (root == NULL)
   {
     root = S1;
     S1->next = root;
     S1->prev = root;
   }
+  // 캐시가 존재하면,
   else
   {
     root->prev->next = S1;
@@ -186,60 +183,56 @@ void insert_cache(char *path, char *body, int size)
   }
 }
 
+// 캐시가 있는지 확인하는 함수
 int find_cache(char *client_path, int client_fd)
 {
   cache *find_root = root;
   char *cache_buf[MAXBUF];
   char *filetype[MAXLINE];
-
-  // sprintf(buf, "HTTP/1.0 200 OK\r\n");
-  // sprintf(buf, "%sServer: Tiny Web Server\r\n", cashe_buf);
-  // sprintf(buf, "%sConnection: close\r\n", cache_buf);
-  // sprintf(buf, "%sContent-length: %d\r\n", cache_buf, find_root->size);
-  // sprintf(buf, "%sContent-type: %s\r\n\r\n", cache_buf, filetype);
+  // 캐시가 없으면,
   if (find_root == NULL)
   {
     return 0;
   }
-
+  // 캐시가 있으면, 캐시의 path 와 client에게 입력 받은 path를 비교, 루트가 가리키는 첫번째 캐시가 맞으면 if 문을 들어간다.
   if (!strcmp(find_root->path, client_path))
-  { get_filetype(find_root->path, filetype);
-
+  { // filetype 을 알기 위해 get_filetype 함수 호출
+    get_filetype(find_root->path, filetype);
+    // client에게 전달해줄 캐시에 대한 헤더정보
     sprintf(cache_buf, "HTTP/1.0 200 OK\r\n");
     sprintf(cache_buf, "%sServer: Tiny Web Server\r\n", cache_buf);
     sprintf(cache_buf, "%sConnection: close\r\n", cache_buf);
     sprintf(cache_buf, "%sContent-length: %d\r\n", cache_buf, find_root->size);
     sprintf(cache_buf, "%sContent-type: %s\r\n\r\n", cache_buf, filetype);
+    // client에게 response header 전달
     Rio_writen(client_fd, cache_buf, strlen(cache_buf));
-    printf("\ncache_buf : %s\n", cache_buf);
+    // client에게 캐시에 저장된 body 전달
     Rio_writen(client_fd,find_root->body, find_root->size);
-    printf("\nfind_root-> body : %s\n", find_root->body);
-    printf("Am i here? \n");
 
     return 1;
-
   }
+  // 캐시의 path와 client에게 입력 받은 path의 정보가 다르면, while문으로 탐색
   while(find_root->next != root)
   {
     find_root = find_root->next;
     if (!strcmp(find_root->path, client_path))
     {
-      
       sprintf(cache_buf, "HTTP/1.0 200 OK\r\n");
       sprintf(cache_buf, "%sServer: Tiny Web Server\r\n", cache_buf);
       sprintf(cache_buf, "%sConnection: close\r\n", cache_buf);
       sprintf(cache_buf, "%sContent-length: %d\r\n", cache_buf, find_root->size);
       sprintf(cache_buf, "%sContent-type: text/html\r\n\r\n", cache_buf);
+     
       Rio_writen(client_fd, cache_buf, strlen(cache_buf));
-
       Rio_writen(client_fd,find_root->body, find_root->size);
+      // 첫번째 캐시가 아닐테니, LIFO 방식으로 가장 최신 캐시로 위치수정 
       pull_cache(find_root);
       return 1;
     }
   }
   return 0;
 }
-
+// cache 연결 리스트의 논리적인 위치를 앞으로 당겨와주는 함수
 void pull_cache(cache *find_root)
 {
   find_root->prev->next = find_root->next;
@@ -250,14 +243,16 @@ void pull_cache(cache *find_root)
   find_root->next = root;
 }
 
+// 캐시를 지워주는 함수
 void delete_cache()
-{ // 캐시가 하나
+{ // 캐시가 하나 있을 때,
  if (root->next = root)
  {
   free(root->body);
   free(root);
   root = NULL;
  }
+ // 캐시가 두 개 이상 있을 때,
  else
  {
   root->prev->prev->next = root;
@@ -266,7 +261,9 @@ void delete_cache()
   free(root->prev);
  } 
 }
-
+/*
+* 오류를 client 에게 응답해주는 함수
+*/
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg)
 {
   char buf[MAXLINE], body[MAXBUF];
@@ -285,6 +282,10 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   Rio_writen(fd, buf, strlen(buf));
   Rio_writen(fd, body, strlen(body));
 }
+
+/*
+* filename 으로 filetype 을 결정하는 함수
+*/
 void get_filetype(char *filename, char *filetype)
 {
   if (strstr(filename, ".html"))
